@@ -1,4 +1,11 @@
+use faer::{
+    Scale,
+    col::{Col, ColRef},
+    mat::{Mat, MatRef},
+};
 use std::{fs::File, io::read_to_string, path::Path};
+
+const DIM: usize = 10;
 
 #[derive(Clone, Copy, Debug)]
 enum Label {
@@ -13,11 +20,11 @@ impl From<f64> for Label {
         }
     }
 }
-impl Label {
-    fn same_sign(&self, f: f64) -> bool {
-        match (self, f.is_sign_positive()) {
-            (Self::Positive, true) | (Self::Negative, false) => true,
-            _ => false,
+impl From<Label> for f64 {
+    fn from(value: Label) -> Self {
+        match value {
+            Label::Positive => 1.0,
+            Label::Negative => -1.0,
         }
     }
 }
@@ -65,10 +72,16 @@ fn augment_data(data: Vec<LabeledPoint>, v: f64) -> Vec<LabeledPoint> {
     data.into_iter().map(|p| p.augment(v)).collect()
 }
 
-fn q11() -> f64 {
-    const DIM: usize = 10;
+fn pw_sgd(l: Label, w: ColRef<f64>, x: ColRef<f64>) -> f64 {
+    sigmoid(-f64::from(l) * (w.transpose() * x))
+}
+fn sigmoid(f: f64) -> f64 {
+    1.0 / (1.0 + (-f).exp())
+}
+
+fn q11() -> (f64, Col<f64>) {
     let data = augment_data(get_data::<DIM, _>("./hw3_train.txt"), 1.0);
-    let mut mat = faer::mat::Mat::<f64, _, _>::zeros(data.len(), DIM + 1);
+    let mut mat = Mat::<f64, _, _>::zeros(data.len(), DIM + 1);
     mat.row_iter_mut()
         .zip(&data)
         .for_each(|(row, LabeledPoint { coordinates, .. })| {
@@ -78,15 +91,97 @@ fn q11() -> f64 {
         });
     let svd = faer::linalg::solvers::Svd::new(mat.as_ref()).unwrap();
     let pinv = svd.pseudoinverse();
-    let y = faer::col::Col::from_iter(data.iter().map(|LabeledPoint { label, .. }| match label {
-        Label::Positive => 1.0,
-        Label::Negative => -1.0,
-    }));
-    return ((faer::mat::Mat::<f64, _, _>::identity(data.len(), data.len()) - mat * pinv) * y)
-        .squared_norm_l2()
-        / (data.len() as f64);
+    let y = Col::from_iter(
+        data.iter()
+            .map(|LabeledPoint { label, .. }| f64::from(*label)),
+    );
+    (
+        ((Mat::<f64, _, _>::identity(data.len(), data.len()) - mat * pinv.as_ref()) * y.as_ref())
+            .squared_norm_l2()
+            / (data.len() as f64),
+        pinv * y,
+    )
+}
+
+fn q12() -> f64 {
+    use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
+    const NUM_EXPS: usize = 1000;
+    let data = augment_data(get_data::<DIM, _>("./hw3_train.txt"), 1.0);
+    let mut mat = Mat::<f64, _, _>::zeros(data.len(), DIM + 1);
+    mat.row_iter_mut()
+        .zip(&data)
+        .for_each(|(row, LabeledPoint { coordinates, .. })| {
+            row.iter_mut()
+                .zip(coordinates)
+                .for_each(|(coordinate, c)| *coordinate = *c);
+        });
+    let mat = mat.as_ref();
+    let y = Col::from_iter(
+        data.iter()
+            .map(|LabeledPoint { label, .. }| f64::from(*label)),
+    );
+
+    (0..NUM_EXPS)
+        .into_par_iter()
+        .map_init(rand::rng, |mut rng, _experiment| {
+            use rand::prelude::*;
+            const ETA: f64 = 0.001;
+            let w = (0..800).fold(Col::zeros(DIM + 1), |w, _iterations| {
+                let LabeledPoint { coordinates, label } = data.choose(&mut rng).unwrap();
+                let x = ColRef::from_slice(coordinates);
+                Scale(ETA * 2.0 * (f64::from(*label) - w.transpose() * x)) * x + w
+            });
+            (mat * MatRef::from_repeated_col(w.as_ref(), 1)
+                - MatRef::from_repeated_col(y.as_ref(), 1))
+            .squared_norm_l2()
+                / (data.len() as f64)
+        })
+        .sum::<f64>()
+        / (NUM_EXPS as f64)
+}
+
+fn q13() -> f64 {
+    sgd_logistic(Col::zeros(DIM + 1).as_ref())
+}
+
+fn q14(init_w: ColRef<f64>) -> f64 {
+    sgd_logistic(init_w)
+}
+
+fn sgd_logistic(init_w: ColRef<f64>) -> f64 {
+    use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
+    const NUM_EXPS: usize = 1000;
+    let data = augment_data(get_data::<DIM, _>("./hw3_train.txt"), 1.0);
+
+    (0..NUM_EXPS)
+        .into_par_iter()
+        .map_init(rand::rng, |mut rng, _experiment| {
+            use rand::prelude::*;
+            const ETA: f64 = 0.001;
+            let w = (0..800).fold(init_w.to_owned(), |w, _iterations| {
+                let LabeledPoint { coordinates, label } = data.choose(&mut rng).unwrap();
+                let x = ColRef::from_slice(coordinates);
+                Scale(ETA * f64::from(*label) * pw_sgd(*label, w.as_ref(), x)) * x + w
+            });
+
+            data.iter()
+                .fold(0.0, |err, LabeledPoint { coordinates, label }| {
+                    err + f64::ln(
+                        1.0 + f64::exp(
+                            -f64::from(*label) * w.transpose() * ColRef::from_slice(coordinates),
+                        ),
+                    )
+                })
+                / (data.len() as f64)
+        })
+        .sum::<f64>()
+        / (NUM_EXPS as f64)
 }
 
 fn main() {
-    println!(r#"q11: E_"in" = {}"#, q11());
+    let (q11, q11w) = q11();
+    println!(r#"q11: E_"in" = {}"#, q11);
+    println!(r#"q12: E_"in" = {}"#, q12());
+    println!(r#"q13: E_"in" = {}"#, q13());
+    println!(r#"q14: E_"in" = {}"#, q14(q11w.as_ref()));
 }
