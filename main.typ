@@ -138,3 +138,39 @@
   - Per OVO instance would be $2 dot n/K$ size, which takes $2 dot a dot n/K$ time by premise
   - OVO needs $binom(K, 2)$ instances
   - $binom(K, 2) dot 2 dot a dot n/K = (K (K-1))/2 dot 2 dot a dot n/K = a dot (K-1) dot n$
+
+== Nonlinear Transformation
+
+8. Example of resoluting power i.e. VC i.e. break point increase for $6$ points on $RR^2$
+  - *E*: these 6 points can be shattered
+  - Observe that via quadratic transform $Phi$, the ${bold(x)_i}$ are mapped as following: $ X := mat(
+
+      , 1, x, x y, y, x^2, y^2;
+      x_1 & = (2,0), 1, 2, 0, 0, 4, 0;
+      x_2 & = (0,2), 1, 0, 0, 2, 0, 4;
+      x_3 & = (-2, 0), 1, -2, 0, 0, 4, 0;
+      x_4 & = (0, -2), 1, 0, 0, -2, 0, 4;
+      x_5 & = (0,0), 1, 0, 0, 0, 0, 0;
+      x_6 & = (1,1), 1, 1, 1, 1, 1, 1;
+      augment: #(hline: 1, vline: 1)
+    ) $ of which determinant is $-256$, in particular it's invertible
+  - Meaning for any ${y_i in {plus.minus 1}}$, or rather any dichotomy, simply choose $bold(w) := X^(-1) bold(y)$ and then we'd have $X bold(w) = y$: a line described by $bold(w)$ in the $z$-space achieving the requested dichotomy.
+
+9. Invertible linear transform on input data (uh so why put this question in nonlinear transform section...? but anyway) given by $bold(x) mapsto Gamma bold(x)$: note $bold(x)$ is column here
+  - *B*: $bold(w) = Gamma^T tilde(bold(w))$ and same $E_"in"$
+  - Recall we form $X$ row by row $bold(x)_i^T$ meaning after the linear transform we have row by row $(Gamma bold(x)_i)^T$ and so the new matrix shall be $X Gamma^T$ (think of multiplication in block matrices). Let's call it $Z$.
+  - Linear regression on the transformed data yields $tilde(bold(w)) = (Z^T Z)^(-1) Z^T bold(y)$, as opposed to linear regression on the original space $bold(w) = (X^T X)^(-1) X^T bold(y)$ as deduced during in the lectures
+  - Simplify the terms, we have: $ tilde(bold(w)) & = (Z^T Z)^(-1) Z^T bold(y) \
+                   & =^"defn" ((X Gamma^T)^T (X Gamma^T))^(-1) (X Gamma^T)^T bold(y) \
+                   & =^"transpose" ( Gamma X^T X Gamma^T )^(-1) Gamma X^T bold(y) \
+                   & =^("invertible premises") ( (Gamma^T)^(-1) (X^T X)^(-1) Gamma^(-1) Gamma X^T bold(y) ) \
+                   & =^"defn" (Gamma^T)^(-1) bold(w) $ or equivalently (since $Gamma$ invertible) $bold(w) = Gamma^T tilde(bold(w))$
+  - $E_"in"$ is defined to be $1/N norm(X bold(w) - bold(y))^2$, so in the transformed space we evaluate correspondingly as $ 1/N norm(Z tilde(bold(w)) - bold(y))^2 & =^"defn" 1/N norm(X Gamma^T ((Gamma^T)^(-1) bold(w)) - bold(y))^2 \
+                                           & = 1/N norm(X bold(w) - bold(y))^2 $ and so exactly the same
+
+10. Intelligent #link("https://www.reddit.com/r/singularity/comments/1xm89o3")[transform] of data into (absurdly) high dimensional one-hot vectors
+  - *C*: It's most likely that $forall 1<=i<=N #h(1em) 2 bold(x)_n != bold(x)_i$, and so $Phi(2 bold(x)_n) = 0_(RR^N)$
+  - The question states we may ignore the constant term, meaning via arranging ${Phi(bold(x)_i) where 1<=i<=N}$ as rows, we get some matrix in $M_N (RR)$
+  - In particular thanks to the one-hot encoding this is simply the identity matrix (assuming the $i$-th row being row formulation of $Phi(bold(x)_i)$)
+  - Solving linear regression with invertible matrices, in particular identity, the $tilde(bold(w))$ is simply $bold(y)$ and thus _zero_ $E_"in"$
+  - $g(bold(x)) := tilde(bold(w))^T Phi(bold(x))$, notice since $Phi$ is one-hot comparing to known data, meaning unforseen data is encoded as $tilde(bold(w))^T 0_(RR^N) = 0_RR$.
