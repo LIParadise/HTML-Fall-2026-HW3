@@ -80,10 +80,10 @@ fn sigmoid(f: f64) -> f64 {
 }
 
 fn q11() -> (f64, Col<f64>) {
-    let data = augment_data(get_data::<DIM, _>("./hw3_train.txt"), 1.0);
-    let mut mat = Mat::<f64, _, _>::zeros(data.len(), DIM + 1);
+    let train = augment_data(get_data::<DIM, _>("./hw3_train.txt"), 1.0);
+    let mut mat = Mat::<f64, _, _>::zeros(train.len(), DIM + 1);
     mat.row_iter_mut()
-        .zip(&data)
+        .zip(&train)
         .for_each(|(row, LabeledPoint { coordinates, .. })| {
             row.iter_mut()
                 .zip(coordinates)
@@ -92,13 +92,14 @@ fn q11() -> (f64, Col<f64>) {
     let svd = faer::linalg::solvers::Svd::new(mat.as_ref()).unwrap();
     let pinv = svd.pseudoinverse();
     let y = Col::from_iter(
-        data.iter()
+        train
+            .iter()
             .map(|LabeledPoint { label, .. }| f64::from(*label)),
     );
     (
-        ((Mat::<f64, _, _>::identity(data.len(), data.len()) - mat * pinv.as_ref()) * y.as_ref())
+        ((Mat::<f64, _, _>::identity(train.len(), train.len()) - mat * pinv.as_ref()) * y.as_ref())
             .squared_norm_l2()
-            / (data.len() as f64),
+            / (train.len() as f64),
         pinv * y,
     )
 }
@@ -106,10 +107,10 @@ fn q11() -> (f64, Col<f64>) {
 fn q12() -> f64 {
     use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
     const NUM_EXPS: usize = 1000;
-    let data = augment_data(get_data::<DIM, _>("./hw3_train.txt"), 1.0);
-    let mut mat = Mat::<f64, _, _>::zeros(data.len(), DIM + 1);
+    let train = augment_data(get_data::<DIM, _>("./hw3_train.txt"), 1.0);
+    let mut mat = Mat::<f64, _, _>::zeros(train.len(), DIM + 1);
     mat.row_iter_mut()
-        .zip(&data)
+        .zip(&train)
         .for_each(|(row, LabeledPoint { coordinates, .. })| {
             row.iter_mut()
                 .zip(coordinates)
@@ -117,7 +118,8 @@ fn q12() -> f64 {
         });
     let mat = mat.as_ref();
     let y = Col::from_iter(
-        data.iter()
+        train
+            .iter()
             .map(|LabeledPoint { label, .. }| f64::from(*label)),
     );
 
@@ -127,14 +129,14 @@ fn q12() -> f64 {
             use rand::prelude::*;
             const ETA: f64 = 0.001;
             let w = (0..800).fold(Col::zeros(DIM + 1), |w, _iterations| {
-                let LabeledPoint { coordinates, label } = data.choose(&mut rng).unwrap();
+                let LabeledPoint { coordinates, label } = train.choose(&mut rng).unwrap();
                 let x = ColRef::from_slice(coordinates);
                 Scale(ETA * 2.0 * (f64::from(*label) - w.transpose() * x)) * x + w
             });
             (mat * MatRef::from_repeated_col(w.as_ref(), 1)
                 - MatRef::from_repeated_col(y.as_ref(), 1))
             .squared_norm_l2()
-                / (data.len() as f64)
+                / (train.len() as f64)
         })
         .sum::<f64>()
         / (NUM_EXPS as f64)
