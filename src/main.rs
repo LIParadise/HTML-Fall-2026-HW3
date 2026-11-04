@@ -2,6 +2,7 @@ use faer::{
     Scale,
     col::{Col, ColRef},
     mat::{Mat, MatRef},
+    row::RowRef,
 };
 use std::{fs::File, io::read_to_string, path::Path};
 
@@ -17,6 +18,14 @@ impl From<f64> for Label {
         match value.is_sign_positive() {
             true => Self::Positive,
             _ => Self::Negative,
+        }
+    }
+}
+impl Label {
+    fn same_sign(&self, f: f64) -> bool {
+        match (self, f.is_sign_positive()) {
+            (Self::Positive, true) | (Self::Negative, false) => true,
+            _ => false,
         }
     }
 }
@@ -143,41 +152,93 @@ fn q12() -> f64 {
 }
 
 fn q13() -> f64 {
-    sgd_logistic(Col::zeros(DIM + 1).as_ref())
+    sgd_logistic(Col::zeros(DIM + 1).as_ref()).0
 }
 
-fn q14(init_w: ColRef<f64>) -> f64 {
+fn q14_q15(init_w: ColRef<f64>) -> (f64, f64) {
     sgd_logistic(init_w)
 }
 
-fn sgd_logistic(init_w: ColRef<f64>) -> f64 {
+fn binary_err(w: ColRef<f64>, data: &[LabeledPoint]) -> f64 {
+    data.iter()
+        .filter(|LabeledPoint { coordinates, label }| {
+            !label.same_sign(RowRef::from_slice(coordinates) * w)
+        })
+        .count() as f64
+        / (data.len() as f64)
+}
+
+fn sgd_logistic(init_w: ColRef<f64>) -> (f64, f64) {
     use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
     const NUM_EXPS: usize = 1000;
-    let data = augment_data(get_data::<DIM, _>("./hw3_train.txt"), 1.0);
+    let train = augment_data(get_data::<DIM, _>("./hw3_train.txt"), 1.0);
 
-    (0..NUM_EXPS)
+    // FIXME doing Q15 0/1 error here is such a messy code placement/pipeline...
+    let test = augment_data(get_data::<DIM, _>("./hw3_test.txt"), 1.0);
+
+    #[derive(Clone, Copy, Debug)]
+    struct HW3 {
+        q15: f64,
+        e_in: f64,
+    }
+    impl std::iter::Sum for HW3 {
+        /// TODO this abuses the fields: it's at the same time one experiment result and sum
+        /// maybe sum for heterogeneous types...?
+        fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+            iter.into_iter().fold(
+                HW3 {
+                    q15: 0.0,
+                    e_in: 0.0,
+                },
+                |HW3 {
+                     q15: q15_sum,
+                     e_in: e_in_sum,
+                 },
+                 HW3 { q15, e_in }| {
+                    HW3 {
+                        q15: q15_sum + q15,
+                        e_in: e_in_sum + e_in,
+                    }
+                },
+            )
+        }
+    }
+
+    let ret = (0..NUM_EXPS)
         .into_par_iter()
         .map_init(rand::rng, |mut rng, _experiment| {
             use rand::prelude::*;
             const ETA: f64 = 0.001;
             let w = (0..800).fold(init_w.to_owned(), |w, _iterations| {
-                let LabeledPoint { coordinates, label } = data.choose(&mut rng).unwrap();
+                let LabeledPoint { coordinates, label } = train.choose(&mut rng).unwrap();
                 let x = ColRef::from_slice(coordinates);
                 Scale(ETA * f64::from(*label) * pw_sgd(*label, w.as_ref(), x)) * x + w
             });
 
-            data.iter()
-                .fold(0.0, |err, LabeledPoint { coordinates, label }| {
-                    err + f64::ln(
-                        1.0 + f64::exp(
-                            -f64::from(*label) * w.transpose() * ColRef::from_slice(coordinates),
-                        ),
-                    )
-                })
-                / (data.len() as f64)
+            HW3 {
+                q15: f64::abs(binary_err(w.as_ref(), &train) - binary_err(w.as_ref(), &test)),
+                e_in: train
+                    .iter()
+                    .fold(0.0, |err, LabeledPoint { coordinates, label }| {
+                        err + f64::ln(
+                            1.0 + f64::exp(
+                                -f64::from(*label)
+                                    * w.transpose()
+                                    * ColRef::from_slice(coordinates),
+                            ),
+                        )
+                    })
+                    / (train.len() as f64),
+            }
         })
-        .sum::<f64>()
-        / (NUM_EXPS as f64)
+        .sum::<HW3>();
+    (ret.e_in / (NUM_EXPS as f64), ret.q15 / (NUM_EXPS as f64))
+}
+
+fn q16(w: ColRef<f64>) -> f64 {
+    let train = augment_data(get_data::<DIM, _>("./hw3_train.txt"), 1.0);
+    let test = augment_data(get_data::<DIM, _>("./hw3_test.txt"), 1.0);
+    f64::abs(binary_err(w, &train) - binary_err(w, &test))
 }
 
 fn main() {
@@ -185,5 +246,8 @@ fn main() {
     println!(r#"q11: E_"in" = {}"#, q11);
     println!(r#"q12: E_"in" = {}"#, q12());
     println!(r#"q13: E_"in" = {}"#, q13());
-    println!(r#"q14: E_"in" = {}"#, q14(q11w.as_ref()));
+    let (q14, q15) = q14_q15(q11w.as_ref());
+    println!(r#"q14: E_"in" = {}"#, q14);
+    println!(r#"q15: generalization error = {}"#, q15);
+    println!(r#"q16: generalization error = {}"#, q16(q11w.as_ref()));
 }
